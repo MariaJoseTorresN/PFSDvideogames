@@ -1,43 +1,81 @@
-import org.apache.spark.sql.Dataset
+import org.apache.spark.ml.feature.{OneHotEncoder, StandardScaler, StringIndexer, VectorAssembler}
+import org.apache.spark.sql.{Dataset, Encoders}
 
 object Predictor extends SparkSessionWrapper {
 
-  import org.apache.spark.sql.Encoders
   import spark.implicits._
   import org.apache.spark.ml.regression.LinearRegression
 
-  case class AppVGSale(Rank: Int,
-                       Name: String,
-                       Platform: String,
-                       Year: Int,
-                       Genre: String,
-                       Publisher: String,
-                       NA_Sales: Double,
-                       EU_Sales: Double,
-                       JP_Sales: Double,
-                       Other_Sales: Double,
-                       Global_Sales: Double)
+  case class VGSalesInfo(Rank: Int,
+                         Name: String,
+                         Platform: String,
+                         Year: Long,
+                         Genre: String,
+                         Publisher: String,
+                         NA_Sales: Double,
+                         EU_Sales: Double,
+                         JP_Sales: Double,
+                         Other_Sales: Double,
+                         Global_Sales: Double)
 
-  val appVGSalesSchema = Encoders.product[AppVGSale].schema
+  lazy val vgsalesData: Dataset[VGSalesInfo] = spark.read.format("csv")
+    .option("header", "true")
+    .schema(Encoders.product[VGSalesInfo].schema)
+    .load("src/main/resources/vgsales.csv")
+    .as[VGSalesInfo]
 
-  def main(args: Array[String]):Unit = {
-    val appVGSaleDs: Dataset[AppVGSale] =
-      spark
-        .read
-        .format("csv")
-        .option("header", "true")
-        .schema(appVGSalesSchema)
-        .load("src/main/resources/vgsales.csv")
-        .as[AppVGSale]
+  var vgsalesDF = vgsalesData.toDF()
 
+  def indexador(inputCol: String, outputCol: String): StringIndexer = {
+    new StringIndexer().setInputCol(inputCol).setOutputCol(outputCol)
+  }
 
+  def main(args: Array[String]): Unit = {
+    //vgsalesData.show()
+    val platformIndexed = indexador("Platform","PlatformIndex")
+    vgsalesDF = platformIndexed.fit(vgsalesDF).transform(vgsalesDF)
+    val genreIndexed = indexador("Genre", "GenreIndex")
+    vgsalesDF = genreIndexed.fit(vgsalesDF).transform(vgsalesDF)
+    val publisherIndexed = indexador("Publisher", "PublisherIndex")
+    vgsalesDF = publisherIndexed.fit(vgsalesDF).transform(vgsalesDF)
+
+    //vgsalesDF.show()
+    val dataFrame2 = vgsalesDF.drop("Rank", "Name", "Year")
+    val dataFrame3 = vgsalesDF.drop("NA_Sales", "EU_Sales", "JP_Sales", "Other_Sales")
+
+    val labels = dataFrame3.select("Global_Sales")
+    val columns = Array("PlatformIndex", "GenreIndex", "PublisherIndex", "NA_Sales", "EU_Sales")
+    val assembler = new VectorAssembler()
+      .setInputCols(columns)
+      .setOutputCol("features")
+
+    val output = assembler.transform(dataFrame2)
+    output.show()
+
+    val Array(training, test) = output.randomSplit(Array(0.7, 0.3), 18)
+    val scaler = new StandardScaler()
+      .setInputCol("features")
+      .setOutputCol("scaledFeatures")
+      .setWithStd(true)
+      .setWithMean(false)
+    val scalerModel = scaler.fit(training)
+    val scaledData = scalerModel.transform(training)
+    scaledData.show()
+
+    val scalerModelTest = scaler.fit(test)
+    val scaledDataTest = scalerModelTest.transform(test)
+    scaledDataTest.show()
 
     val linearRegression = new LinearRegression()
-      .setMaxIter(10).setRegParam(0.3).setElasticNetParam(0.8)
 
-    val linearRegressionModel = linearRegression.fit(appVGSaleDs)
+    val linearRegressionModel = linearRegression.fit(scaledData)
+    val linearRegressionPredictions = linearRegressionModel.transform(scaledDataTest)
 
-    val summary = linearRegressionModel.summary
-    summary.residuals.show()
+    linearRegressionPredictions.show()
+
+
+
+
+
   }
 }

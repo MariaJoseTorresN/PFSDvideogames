@@ -9,11 +9,11 @@ object ReadFile extends  SparkSessionWrapper{
                          Year: Long,
                          Genre: String,
                          Publisher: String,
-                         NA_Sales: Long,
-                         EU_Sales: Long,
-                         JP_Sales: Long,
-                         Other_Sales: Long,
-                         Global_Sales: Long)
+                         NA_Sales: Double,
+                         EU_Sales: Double,
+                         JP_Sales: Double,
+                         Other_Sales: Double,
+                         Global_Sales: Double)
 
   lazy val vgsalesData: Dataset[VGSalesInfo] = spark.read.format("csv")
     .option("header", "true")
